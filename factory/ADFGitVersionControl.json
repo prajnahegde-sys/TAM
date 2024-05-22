@@ -1,0 +1,9 @@
+{
+	"name": "ADFGitVersionControl",
+	"location": "southeastasia",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "3da553fe-396a-4e15-8bf9-26014a4cab5e",
+		"tenantId": "f0d8180a-3c58-41dd-8734-5cb2de2c9b36"
+	}
+}
