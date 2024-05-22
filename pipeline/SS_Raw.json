@@ -3,7 +3,7 @@
 	"properties": {
 		"activities": [
 			{
-				"name": "Execute Pipeline1",
+				"name": "SS to Raw",
 				"type": "ExecutePipeline",
 				"dependsOn": [],
 				"policy": {
