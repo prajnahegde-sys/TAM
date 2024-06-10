@@ -1,0 +1,56 @@
+{
+	"name": "DelimitedText1",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "AzureBlobStorage1",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "DelimitedText",
+		"typeProperties": {
+			"location": {
+				"type": "AzureBlobStorageLocation",
+				"fileName": "test_oneaccountdb_raw.csv",
+				"container": "all"
+			},
+			"columnDelimiter": ",",
+			"escapeChar": "\\",
+			"firstRowAsHeader": true,
+			"quoteChar": "\""
+		},
+		"schema": [
+			{
+				"name": "8005331903652",
+				"type": "String"
+			},
+			{
+				"name": "Prajna",
+				"type": "String"
+			},
+			{
+				"name": "P",
+				"type": "String"
+			},
+			{
+				"name": "Hegde",
+				"type": "String"
+			},
+			{
+				"name": "01/02/1923",
+				"type": "String"
+			},
+			{
+				"name": "12345",
+				"type": "String"
+			},
+			{
+				"name": "Prajna@email.com",
+				"type": "String"
+			},
+			{
+				"name": "22/01/24 01:30",
+				"type": "String"
+			}
+		]
+	}
+}
