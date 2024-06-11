@@ -20,35 +20,19 @@
 		},
 		"schema": [
 			{
-				"name": "8005331903652",
+				"name": "Employee_ID_NIP",
 				"type": "String"
 			},
 			{
-				"name": "Prajna",
+				"name": "Outlet_ID",
 				"type": "String"
 			},
 			{
-				"name": "P",
+				"name": "Employee_First_Name",
 				"type": "String"
 			},
 			{
-				"name": "Hegde",
-				"type": "String"
-			},
-			{
-				"name": "01/02/1923",
-				"type": "String"
-			},
-			{
-				"name": "12345",
-				"type": "String"
-			},
-			{
-				"name": "Prajna@email.com",
-				"type": "String"
-			},
-			{
-				"name": "22/01/24 01:30",
+				"name": "Employee_Last_Name",
 				"type": "String"
 			}
 		]
