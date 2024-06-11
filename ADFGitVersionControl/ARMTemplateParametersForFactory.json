@@ -1,0 +1,36 @@
+{
+	"$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"value": "ADFGitVersionControl"
+		},
+		"AzureBlobStorage1_connectionString": {
+			"value": ""
+		},
+		"AzureSqlDatabase1_password": {
+			"value": ""
+		},
+		"SftpTest_password": {
+			"value": ""
+		},
+		"AzureSqlDatabase1_properties_typeProperties_server": {
+			"value": "didxserver.database.windows.net"
+		},
+		"AzureSqlDatabase1_properties_typeProperties_database": {
+			"value": "didxdatabase"
+		},
+		"AzureSqlDatabase1_properties_typeProperties_userName": {
+			"value": "didxadmin"
+		},
+		"SftpTest_properties_typeProperties_host": {
+			"value": "sftp.didx.com"
+		},
+		"SftpTest_properties_typeProperties_hostKeyFingerprint": {
+			"value": "qwerty"
+		},
+		"SftpTest_properties_typeProperties_userName": {
+			"value": "qwerty"
+		}
+	}
+}
