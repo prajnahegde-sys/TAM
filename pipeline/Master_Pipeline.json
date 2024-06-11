@@ -18,9 +18,7 @@
 						"type": "DelimitedTextSource",
 						"storeSettings": {
 							"type": "AzureBlobStorageReadSettings",
-							"recursive": true,
-							"wildcardFolderPath": "myfolder*A",
-							"wildcardFileName": "*.csv"
+							"recursive": true
 						},
 						"formatSettings": {
 							"type": "DelimitedTextReadSettings",
