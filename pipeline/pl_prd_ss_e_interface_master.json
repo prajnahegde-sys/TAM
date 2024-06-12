@@ -1,0 +1,234 @@
+{
+	"name": "pl_prd_ss_e_interface_master",
+	"properties": {
+		"description": "Trigger all \"enabled\" DATA_KEYs for a given SS_KEY, using the interface configurations stated in db_meta.t_ctrl_ss_e_interface",
+		"activities": [
+			{
+				"name": "ForEach - DATA_KEY",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "vw_ctrl_ss_e_data_watermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('vw_ctrl_ss_e_data_watermark').output.value",
+						"type": "Expression"
+					},
+					"batchCount": 30,
+					"activities": [
+						{
+							"name": "Execute SS to DV Pipeline",
+							"type": "ExecutePipeline",
+							"dependsOn": [
+								{
+									"activity": "Wait - wait_time_s",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"waitOnCompletion": true,
+								"parameters": {
+									"DataKey": {
+										"value": "@item().data_key",
+										"type": "Expression"
+									},
+									"SsKey": {
+										"value": "@item().ss_key",
+										"type": "Expression"
+									},
+									"InterfaceKey": {
+										"value": "@item().interface_key",
+										"type": "Expression"
+									},
+									"IsAdhoc": {
+										"value": "@pipeline().parameters.IsAdhoc",
+										"type": "Expression"
+									},
+									"TriggerDvLoad": {
+										"value": "@pipeline().parameters.TriggerDvLoad",
+										"type": "Expression"
+									}
+								}
+							}
+						},
+						{
+							"name": "Wait - wait_time_s",
+							"description": "To prevent deadlock due to pipeline concurrency limit by ensuring the data_key with the lowest dependency level and contains child dependency gets triggered first",
+							"type": "Wait",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"waitTimeInSeconds": {
+									"value": "@item().wait_time_s",
+									"type": "Expression"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "vw_ctrl_ss_e_data_watermark",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "If Condition - Check Sync",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT \n    data_key,\n    table_name,\n    ss_key,\n    interface_key,\n    -- Minimum wait time must be 1 second\n    (priority*(deps_lvl+1)*10) \n    -- If there are no data keys involved in child dependency extractions (i.e. not parent or child data keys), reset wait time to 0\n    - (MIN(priority) OVER(PARTITION BY 1))*10\n    -- Add 2 seconds based on row number to enforce extraction order\n    + 2*ROW_NUMBER() OVER(ORDER BY (SELECT 1)) AS wait_time_s\nFROM \n(\n    ----- Get data keys which are either parent or child data keys -------\n    SELECT *, 1 AS priority\n    FROM db_meta.vw_ctrl_ss_e_data_watermark W\n    WHERE (no_parent_deps > 0 OR no_child_deps > 0)\n    ----------------------------------------------------------------------\n    UNION \n    ----- Get data keys which are neither parent or child data keys ------\n    SELECT *, 2 AS priority\n    FROM db_meta.vw_ctrl_ss_e_data_watermark W\n    WHERE (no_parent_deps = 0 AND no_child_deps = 0)\n    ---------------------------------------------------------------------\n) U\nWHERE ss_key = '@{pipeline().parameters.SsKey}' AND interface_key = '@{pipeline().parameters.InterfaceKey}'\n    AND is_enabled = 'Y' AND e_delta_dt = '@{pipeline().parameters.BizDate}'\nORDER BY priority, \n    deps_lvl, \n    no_child_deps DESC, \n    no_sem_deps DESC,\n    avg_p2m_e_no_rows DESC,\n    avg_p2m_e_min DESC",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "t_ctrl_ss_e_interface",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT \n    COALESCE(DATEPART(hour, e_after_time), 0) as e_after_hour,\n    COALESCE(DATEPART(minute, e_after_time), 0) as e_after_min,\n    (CASE WHEN DATEDIFF(second, CONVERT(time, GETDATE() AT TIME ZONE 'UTC' AT TIME ZONE 'Singapore Standard Time'), e_after_time) > 0 \n        -- Round up to the nearest 60\n        THEN CEILING(DATEDIFF(second, CONVERT(time, GETDATE() AT TIME ZONE 'UTC' AT TIME ZONE 'Singapore Standard Time'), e_after_time)/60.00)*60\n        ELSE 1 \n    END) AS e_wait_seconds,\n    JSON_VALUE(add_params, '$.sync_script_link') AS sync_script_link\nFROM db_meta.t_ctrl_ss_e_interface I\nWHERE I.ss_key = '@{pipeline().parameters.SsKey}' AND I.interface_key = '@{pipeline().parameters.InterfaceKey}' ",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "Wait until e_after_time",
+				"type": "Wait",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_ss_e_interface",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"waitTimeInSeconds": {
+						"value": "@activity('t_ctrl_ss_e_interface').output.firstRow.e_wait_seconds",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "If Condition - Check Sync",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Wait until e_after_time",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@not(empty(activity('t_ctrl_ss_e_interface').output.firstRow.sync_script_link))",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "pl_prd_ss_e_sync_check",
+							"type": "ExecutePipeline",
+							"dependsOn": [],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"waitOnCompletion": true,
+								"parameters": {
+									"SsKey": {
+										"value": "@pipeline().parameters.SsKey",
+										"type": "Expression"
+									},
+									"InterfaceKey": {
+										"value": "@pipeline().parameters.InterfaceKey",
+										"type": "Expression"
+									},
+									"IsAdhoc": {
+										"value": "@pipeline().parameters.IsAdhoc",
+										"type": "Expression"
+									}
+								}
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"SsKey": {
+				"type": "string",
+				"defaultValue": "SS009"
+			},
+			"IsAdhoc": {
+				"type": "string",
+				"defaultValue": "Y"
+			},
+			"BizDate": {
+				"type": "string",
+				"defaultValue": "2020-10-01"
+			},
+			"InterfaceKey": {
+				"type": "string",
+				"defaultValue": "IF001"
+			},
+			"TriggerDvLoad": {
+				"type": "string",
+				"defaultValue": "Y"
+			}
+		},
+		"folder": {
+			"name": "SS Extraction"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-05-23T06:41:18Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
