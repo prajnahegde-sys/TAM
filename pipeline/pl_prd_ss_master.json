@@ -261,9 +261,9 @@
 				"type": "ExecutePipeline",
 				"dependsOn": [
 					{
-						"activity": "pl_prd_webhook_post",
+						"activity": "pl_prd_ss_e_polling",
 						"dependencyConditions": [
-							"Completed"
+							"Succeeded"
 						]
 					}
 				],
@@ -272,13 +272,11 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
-					"waitOnCompletion": true,
-					"parameters": {
-						"PricingTier": {
-							"value": "@pipeline().parameters.ScaleUpDbTier",
-							"type": "Expression"
-						}
-					}
+					"pipeline": {
+						"referenceName": "pl_prd_asqlpool_scale",
+						"type": "PipelineReference"
+					},
+					"waitOnCompletion": true
 				}
 			},
 			{
@@ -360,25 +358,6 @@
 							}
 						}
 					]
-				}
-			},
-			{
-				"name": "pl_prd_webhook_post",
-				"type": "ExecutePipeline",
-				"dependsOn": [
-					{
-						"activity": "pl_prd_ss_e_polling",
-						"dependencyConditions": [
-							"Succeeded"
-						]
-					}
-				],
-				"policy": {
-					"secureInput": false
-				},
-				"userProperties": [],
-				"typeProperties": {
-					"waitOnCompletion": true
 				}
 			},
 			{
