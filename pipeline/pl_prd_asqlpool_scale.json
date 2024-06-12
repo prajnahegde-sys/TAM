@@ -1,0 +1,116 @@
+{
+	"name": "pl_prd_asqlpool_scale",
+	"properties": {
+		"activities": [
+			{
+				"name": "t_ctrl_env_config",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT E.*, U.url FROM db_meta.t_ctrl_env_config E\nINNER JOIN db_meta.t_ctrl_env_util U ON E.env = U.env\nWHERE adf_pipeline_name = '@{pipeline().Pipeline}' AND util_key = 'UT002'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "Check for active query in SQL pool",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_env_config",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 600,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SqlDWSource",
+						"sqlReaderQuery": {
+							"value": "DECLARE @can_scale int;\nDECLARE @sqlcmd VARCHAR(MAX);\n\nSET @sqlcmd =(SELECT STRING_AGG(kill_queries,';' + CHAR(10)) FROM(\nSELECT 'KILL ''' + session_id + '''' AS kill_queries FROM \n(\n\tselect session_id from sys.dm_pdw_exec_sessions where is_transactional = 1\n\tUNION\n\tselect session_id from sys.dm_pdw_waits where type = 'Exclusive'\n\tUNION\n\tselect session_id from sys.dm_pdw_exec_requests where status not in ('Completed','Failed','Cancelled') and session_id != SESSION_ID()\n) sessions_to_kill \n) testcmd)\nEXEC(@sqlcmd);\n\nwith test as \n(\n    select\n    (select @@version) version_number\n    ,(select count(*) from sys.dm_pdw_exec_requests where status  not in ('Completed','Failed','Cancelled') and session_id != SESSION_ID()) active_query_count\n    ,(select count(*) from sys.dm_pdw_exec_sessions where is_transactional = 1) as session_transactional_count\n    ,(select count(*) from sys.dm_pdw_waits where type = 'Exclusive') as pdw_waits\n)\nselect @can_scale=\n    case when\n            (version_number like 'Microsoft Azure SQL Data Warehouse%' or version_number like 'Microsoft Azure Synapse SQL Analytics%')\n            and active_query_count = 0\n            and session_transactional_count = 0\n            and pdw_waits = 0\n            then 1\n    else 0\n    end\nfrom test\nIF (@can_scale = 0)\nBEGIN\nRAISERROR('SQL pool contains active queries.', 16, 1)\nEND\nELSE\nBEGIN\nSELECT 'SUCCEEDED'\nEND;",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "Trigger Auto Scale",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "Check for active query in SQL pool",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.00:30:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "PATCH",
+					"headers": {
+						"Content-Type": "application/json"
+					},
+					"url": {
+						"value": "https://management.azure.com/subscriptions/@{activity('t_ctrl_env_config').output.firstRow.subscription_id}/resourceGroups/@{activity('t_ctrl_env_config').output.firstRow.resource_group_name}/providers/Microsoft.Sql/servers/@{activity('t_ctrl_env_config').output.firstRow.asql_server_name}/databases/@{activity('t_ctrl_env_config').output.firstRow.asql_pool_name}?api-version=2014-04-01",
+						"type": "Expression"
+					},
+					"body": {
+						"value": "{\n    \"properties\": {\n        \"requestedServiceObjectiveName\": \"@{pipeline().parameters.PricingTier}\"\n    }\n}",
+						"type": "Expression"
+					},
+					"authentication": {
+						"type": "MSI",
+						"resource": "https://management.azure.com/"
+					}
+				}
+			}
+		],
+		"parameters": {
+			"PricingTier": {
+				"type": "string",
+				"defaultValue": "DW200c"
+			},
+			"Edition": {
+				"type": "string",
+				"defaultValue": "DataWarehouse"
+			}
+		},
+		"folder": {
+			"name": "ADF Utilities"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-05-23T06:38:06Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
