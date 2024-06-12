@@ -1,0 +1,119 @@
+{
+	"name": "pl_prd_email_notification",
+	"properties": {
+		"activities": [
+			{
+				"name": "Send Email",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_env_config",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Format HTML Error Table",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "POST",
+					"headers": {
+						"Content-Type": "application/json"
+					},
+					"url": {
+						"value": "@activity('t_ctrl_env_config').output.firstRow.url",
+						"type": "Expression"
+					},
+					"body": {
+						"value": "@json(concat('{\"EmailTo\":\"',\nactivity('t_ctrl_env_config').output.firstRow.mailing_list, '\",\n\"Subject\":\"',\npipeline().parameters.Subject,'\",\n\"DataFactoryName\":\"',pipeline().DataFactory,'\",\n\"PipelineName\":\"',\npipeline().parameters.PipelineName,'\",\n\"HtmlErrorTables\":\"',\nactivity('Format HTML Error Table').output.firstRow.html_tables, '\"}'))",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "t_ctrl_env_config",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT M.mailing_list,\nU.url \nFROM db_meta.t_ctrl_env_config E\nINNER JOIN db_meta.t_ctrl_env_util U ON E.env = U.env\nINNER JOIN db_meta.t_ctrl_env_mailing_list M ON E.env = M.env\nWHERE adf_pipeline_name = '@{pipeline().Pipeline}' AND util_key = 'UT005'\nAND M.mailing_list_key = '@{pipeline().parameters.MailingListKey}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "Format HTML Error Table",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT REPLACE(REPLACE(CONCAT(\n(\n\tSELECT STRING_AGG(html_table, CHAR(10)) WITHIN GROUP (ORDER BY row_id ASC) AS html_tables FROM\n\t(\n\tSELECT row_id, \n\tCONCAT('<tr>\n\t<td style=\"padding: 0px 0px 10px\">\n\t<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"min-width:100%;border-top: double;  border-bottom: double\">\n\t    <tbody>', STRING_AGG(html_tr, CHAR(10)),\n\t'</tbody>\n\t</table>\n\t</td>\n\t</tr>') as html_table FROM \n\t(\n\tSELECT CASE WHEN [column] = 'Header' THEN 0 ELSE 1 END AS row_id,\n\tCASE WHEN [column] = 'Header' THEN\n\tCONCAT('<tr>\n\t      \t<th valign=\"top\" style=\"padding:5px; text-align: left; font-family: Arial,sans-serif; font-size: 16px; line-height:20px; width: 100%;\">',[data],'</th>\n\t      </tr>')\n\tELSE\n\tCONCAT('<tr>\n\t      \t<th valign=\"top\" style=\"padding:5px; text-align: left; font-family: Arial,sans-serif; font-size: 16px; line-height:20px; width: 30%;\">',[column],'</th>\n\t      \t<td valign=\"top\" style=\"padding:5px; font-family: Arial,sans-serif; font-size: 16px; line-height:20px; width: 70%;\">',REPLACE([data], CHAR(10), '<br/>'),'</td>\n\t      </tr>')\n\tEND as html_tr\n\tFROM \n\tOPENJSON('@{if(empty(pipeline().parameters.SummaryJsonArray), '[]', replace(pipeline().parameters.SummaryJsonArray, '''', ''''''))}')\n\tWITH (\n\t\t[column] nvarchar(max) '$.column',\n\t\t[data] nvarchar(max) '$.data'\n\t) ARR\n\t) HTML_ROWS\n\tGROUP BY row_id\n\t) HTML_TABLE\n),\n(\n\tSELECT STRING_AGG(html_table, CHAR(10)) WITHIN GROUP (ORDER BY row_id ASC) AS html_tables FROM\n\t(\n\tSELECT row_id, \n\tCONCAT('<tr>\n\t<td style=\"padding: 0px 0px 10px\">\n\t<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"min-width:100%;border-top: double;  border-bottom: double\">\n\t    <tbody>', STRING_AGG(html_tr, CHAR(10)),\n\t'</tbody>\n\t</table>\n\t</td>\n\t</tr>') as html_table FROM \n\t(\n\tSELECT arr.[key] as row_id,\n\tCASE WHEN R.[key] = 'Header' THEN \n\tCONCAT('<tr>\n\t      \t<th valign=\"top\" style=\"padding:5px; text-align: left; font-family: Arial,sans-serif; font-size: 16px; line-height:20px; width: 100%;\">',R.[value],'</th>\n\t      </tr>')\n\tELSE\n\tCONCAT('<tr>\n\t      \t<th valign=\"top\" style=\"padding:5px; text-align: left; font-family: Arial,sans-serif; font-size: 16px; line-height:20px; width: 30%;\">',R.[key],'</th>\n\t      \t<td valign=\"top\" style=\"padding:5px; font-family: Arial,sans-serif; font-size: 16px; line-height:20px; width: 70%;\">',REPLACE(R.[value], CHAR(10), '<br/>'),'</td>\n\t      </tr>') \n\tEND as html_tr\n\tFROM \n\tOPENJSON('@{if(empty(pipeline().parameters.ErrorJsonArray), '[]', replace(pipeline().parameters.ErrorJsonArray, '''', ''''''))}') ARR\n\tCROSS APPLY OPENJSON(ARR.value) R\n\t) HTML_ROWS\n\tGROUP BY row_id\n\t) HTML_TABLE\n)), '\\', '\\\\'), '\"', '\\\"') AS html_tables",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			}
+		],
+		"parameters": {
+			"MailingListKey": {
+				"type": "string",
+				"defaultValue": "FAILURE"
+			},
+			"Subject": {
+				"type": "string"
+			},
+			"PipelineName": {
+				"type": "string"
+			},
+			"ErrorJsonArray": {
+				"type": "string"
+			},
+			"SummaryJsonArray": {
+				"type": "string"
+			}
+		},
+		"folder": {
+			"name": "ADF Utilities"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-05-23T06:38:07Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
