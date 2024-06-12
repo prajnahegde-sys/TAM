@@ -1,0 +1,826 @@
+{
+	"name": "pl_prd_ss2adls_rdb_sqlserver_IF",
+	"properties": {
+		"activities": [
+			{
+				"name": "t_ctrl_env_config",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_ss_e_interface",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": "SELECT KV_NAME FROM db_meta.t_ctrl_env_config",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "t_ctrl_ss_e_data_watermark",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_env_config",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT data_key, start_dt, end_dt, current_dt, new_biz_dt\nFROM db_meta.vw_ctrl_ss_e_data_watermark\nWHERE data_key = '@{pipeline().parameters.DataKey}';",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "AKV - Get Secret Client",
+				"type": "WebActivity",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_data2arch_adls",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"method": "GET",
+					"url": {
+						"value": "https://@{activity('t_ctrl_env_config').output.firstRow.kv_name}.vault.azure.net/secrets/@{activity('t_ctrl_ss_e_interface').output.firstRow.kv_usrnm_clientid_secret_name}?api-version=7.1",
+						"type": "Expression"
+					},
+					"authentication": {
+						"type": "MSI",
+						"resource": "https://vault.azure.net"
+					}
+				}
+			},
+			{
+				"name": "t_ctrl_ss_e_interface",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT data_key, I.ss_key, I.interface_key, adls_ss_dir, \nkv_usrnm_clientid_secret_name,\nkv_secret_name,\ntable_name,\nraw_data_format,rdb_name,\nSUBSTRING(rdb_server_host_port, 1, CHARINDEX(':',rdb_server_host_port)-1) as rdb_server_host, \nSUBSTRING(rdb_server_host_port, CHARINDEX(':',rdb_server_host_port)+1, LEN(rdb_server_host_port)-CHARINDEX(':',rdb_server_host_port)) as rdb_server_port,\nquery, hash_val_enabled,\nCONCAT('data/',adls_ss_dir,'/lnd/',table_name) AS adls_path\nFROM db_meta.t_ctrl_ss_e_interface I\nINNER JOIN db_meta.t_ctrl_ss_e_data_rdb R\nON I.ss_key = R.ss_key\nAND I.interface_key = R.interface_key\nAND R.data_key = '@{pipeline().parameters.DataKey}'\nWHERE I.ss_key = '@{pipeline().parameters.SsKey}' AND I.interface_key = '@{pipeline().parameters.InterfaceKey}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "SS to ADLS",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "Set Variable - Date Query",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Set Filename_DTTM",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": true
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "SqlServerSource",
+						"sqlReaderQuery": {
+							"value": "@{variables('Query')}",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"enableStaging": false
+				}
+			},
+			{
+				"name": "Set Filename_DTTM",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "AKV - Get Secret Client",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "Filename_DTTM",
+					"value": {
+						"value": "@{formatDateTime(convertFromUtc(utcnow(), 'Singapore Standard Time'),'yyyyMMddHHmmss')}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Update NEXT_BIZ_DT",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Update SS Extraction Audit",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "IF ( '@{pipeline().parameters.IsAdhoc}' = 'N')\nBEGIN\nUPDATE db_meta.t_ctrl_ss_e_data_watermark \nSET \n\tnext_biz_dt = '@{activity('t_ctrl_ss_e_data_watermark').output.firstRow.new_biz_dt}',\n\tbiz_dt = '@{activity('t_ctrl_ss_e_data_watermark').output.firstRow.current_dt}',\n\textract_dttm = '@{convertFromUtc(utcnow(), 'Singapore Standard Time')}'\nWHERE data_key = '@{pipeline().parameters.DataKey}'\nEND\n\nSELECT next_biz_dt FROM db_meta.t_ctrl_ss_e_data_watermark WHERE data_key = '@{pipeline().parameters.DataKey}';",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "Update SS Extraction Audit",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Insert SS Extraction Audit",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "DECLARE @status varchar(100) = '@{coalesce(activity('If Condition - Delete validation files')?.Status, 'Failed')}';\nDECLARE @e_file_size_bytes bigint = @{coalesce(activity('SS to ADLS')?.output?.dataWritten, 'NULL')};\nDECLARE @e_row_count bigint = @{coalesce(activity('SS to ADLS')?.output?.rowsCopied, 'NULL')};\nDECLARE @s_row_count bigint = @{if(empty(activity('Get source count')?.output), 'NULL', coalesce(activity('Get source count')?.output?.firstRow?.ROW_COUNT, '0'))}\nDECLARE @is_hash_violated varchar(1) = '@{if(variables('IsHashViolated'), 'Y', 'N')}';\nDECLARE @is_row_count_violated varchar(1) = (CASE WHEN (@e_row_count = @s_row_count) THEN 'N' ELSE 'Y' END);\n\n-- Update audit with extraction information\nUPDATE db_meta.t_audit_ss_e\nSET\n      adls_filename = '@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.adls_path}/@{concat(activity('t_ctrl_ss_e_interface')?.output?.firstRow?.table_name,'_',variables('Filename_DTTM'),'.',activity('t_ctrl_ss_e_interface')?.output?.firstRow?.raw_data_format)}',\n      parameters = (SELECT\n        '@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.rdb_server_host}' AS rdb_server_host,\n        '@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.rdb_server_port}' AS rdb_server_port,\n        '@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.rdb_name}' AS rdb_name,\n        '@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.kv_usrnm_clientid_secret_name}' AS username,\n        -- Remove newline (CR and LF) characters from query\n        '@{replace(variables('Query'),'''','''''')}' AS query\n        FOR JSON PATH, WITHOUT_ARRAY_WRAPPER\n        ),\n      e_file_size_bytes = @e_file_size_bytes,\n      e_no_rows = @e_row_count,\n      row_count_val = CASE WHEN @is_row_count_violated = 'N' THEN 'VAL' ELSE 'INVAL' END,\n      s_no_rows = @s_row_count,\n      hashcode_val = CASE WHEN '@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.hash_val_enabled}' != 'Y' THEN NULL\n                  WHEN @is_hash_violated = 'Y' THEN 'INVAL' \n                  WHEN @is_hash_violated = 'N' THEN 'VAL' \n                  END,\n      biz_dt = '@{activity('t_ctrl_ss_e_data_watermark')?.output?.firstRow?.current_dt}',\n      e_start_biz_dt = '@{activity('t_ctrl_ss_e_data_watermark')?.output?.firstRow?.start_dt}',\n      e_end_biz_dt = '@{activity('t_ctrl_ss_e_data_watermark')?.output?.firstRow?.end_dt}'\nWHERE run_id = '@{pipeline().RunId}';\n\nIF (@status != 'Succeeded' \n            OR @is_row_count_violated = 'Y'\n            OR @is_hash_violated = 'Y')\nBEGIN\n\nUPDATE db_meta.t_audit_ss_e\nSET e_status = 'Failed',\n      error_details = COALESCE(\n          @{if(empty(activity('pl_prd_running_pl_check')?.Error), 'NULL', concat('''', replace(string(activity('pl_prd_running_pl_check')?.Error), '''', ''''''), ''''))},\n          @{if(empty(activity('pl_prd_data2arch_adls')?.Error), 'NULL', concat('''', replace(string(activity('pl_prd_data2arch_adls')?.Error), '''', ''''''), ''''))},\n          @{if(empty(activity('SS to ADLS')?.Error), 'NULL', concat('''', replace(string(activity('SS to ADLS')?.Error), '''', ''''''), ''''))},\n          CASE WHEN @is_hash_violated = 'Y' THEN 'Failed hashcode validation.' END,\n          CASE WHEN @is_row_count_violated = 'Y' THEN 'Failed row count validation.' END,\n            'Please refer to pipeline run for error details.'\n            )\nWHERE run_id = '@{pipeline().RunId}';\n\nRAISERROR('Error occurred during SS extraction.', 16, 1)\nEND\nELSE\nBEGIN\nSELECT 'SUCCEEDED'\nEND;",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "pl_prd_data2arch_adls",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_running_pl_check",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true,
+					"parameters": {
+						"SsDirectoryName": {
+							"value": "@activity('t_ctrl_ss_e_interface').output.firstRow.adls_ss_dir",
+							"type": "Expression"
+						},
+						"TableName": {
+							"value": "@activity('t_ctrl_ss_e_interface').output.firstRow.table_name",
+							"type": "Expression"
+						},
+						"AdlsDirectoryName": {
+							"value": "lnd",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "If Condition - Delete validation files",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "If Condition - Hash Validation Enabled",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@or(variables('IsHashViolated'),\nnot(equals(\n\tint(if(contains(activity('Get source count').output, 'firstRow'), activity('Get source count').output.firstRow.ROW_COUNT, 0)),\n\tactivity('SS to ADLS').output.rowsCopied\n)))",
+						"type": "Expression"
+					},
+					"ifFalseActivities": [
+						{
+							"name": "Copy raw to archive",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "Drop metadata columns",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "BinarySource",
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": false,
+										"wildcardFileName": "*_raw.csv",
+										"deleteFilesAfterCompletion": false
+									},
+									"formatSettings": {
+										"type": "BinaryReadSettings"
+									}
+								},
+								"sink": {
+									"type": "BinarySink",
+									"storeSettings": {
+										"type": "AzureBlobFSWriteSettings"
+									}
+								},
+								"enableStaging": false
+							}
+						},
+						{
+							"name": "Delete validation files",
+							"type": "Delete",
+							"dependsOn": [
+								{
+									"activity": "Copy raw to archive",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"enableLogging": false,
+								"storeSettings": {
+									"type": "AzureBlobFSReadSettings",
+									"recursive": false,
+									"wildcardFileName": {
+										"value": "*@{variables('Filename_DTTM')}_*.csv",
+										"type": "Expression"
+									},
+									"enablePartitionDiscovery": false
+								}
+							}
+						},
+						{
+							"name": "Get raw file structure",
+							"type": "GetMetadata",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"fieldList": [
+									"structure"
+								],
+								"storeSettings": {
+									"type": "AzureBlobFSReadSettings",
+									"recursive": true,
+									"enablePartitionDiscovery": false
+								},
+								"formatSettings": {
+									"type": "DelimitedTextReadSettings"
+								}
+							}
+						},
+						{
+							"name": "Generate lnd file mapping",
+							"type": "Lookup",
+							"dependsOn": [
+								{
+									"activity": "Get raw file structure",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureSqlSource",
+									"sqlReaderQuery": {
+										"value": "SELECT CONCAT('{\n  \"type\": \"TabularTranslator\",\n  \"mappings\": [', \n  STRING_AGG(CONVERT(varchar(max), CONCAT('{\n      \"source\": ', struc.value, ',\n      \"sink\": ', struc.value, '}')\n     ), ','),\n  '  ]\n}'\n  ) as lnd_mapping\nFROM OPENJSON('@{replace(string(activity('Get raw file structure').output.structure), '''', '''''')}') struc\n    WHERE UPPER(JSON_VALUE(struc.value, '$.name')) NOT IN ('ROW_COUNT', 'HASHCODE')",
+										"type": "Expression"
+									},
+									"queryTimeout": "02:00:00",
+									"partitionOption": "None"
+								}
+							}
+						},
+						{
+							"name": "Drop metadata columns",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "Generate lnd file mapping",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "DelimitedTextSource",
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": true,
+										"enablePartitionDiscovery": false
+									},
+									"formatSettings": {
+										"type": "DelimitedTextReadSettings"
+									}
+								},
+								"sink": {
+									"type": "DelimitedTextSink",
+									"storeSettings": {
+										"type": "AzureBlobFSWriteSettings"
+									},
+									"formatSettings": {
+										"type": "DelimitedTextWriteSettings",
+										"quoteAllText": true,
+										"fileExtension": ".txt"
+									}
+								},
+								"enableStaging": false,
+								"translator": {
+									"value": "@json(activity('Generate lnd file mapping').output.firstRow.lnd_mapping)",
+									"type": "Expression"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Get source count",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "SS to ADLS",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "DelimitedTextSource",
+						"storeSettings": {
+							"type": "AzureBlobFSReadSettings",
+							"recursive": true
+						},
+						"formatSettings": {
+							"type": "DelimitedTextReadSettings"
+						}
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "Insert SS Extraction Audit",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "If Condition - Delete validation files",
+						"dependencyConditions": [
+							"Completed",
+							"Skipped"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "DECLARE @status varchar(100) = '@{coalesce(activity('If Condition - Delete validation files')?.Status, 'Failed')}';\n\n-- Insert audit with information which are independent of any activity run in pipeline and status\nINSERT INTO db_meta.t_audit_ss_e (data_key, ss_key, interface_key, is_adhoc, run_id, pipeline_name, e_status, start_time_utc, end_time_utc, error_details)\nVALUES('@{pipeline().parameters.DataKey}', \n'@{pipeline().parameters.SsKey}', \n'@{pipeline().parameters.InterfaceKey}', \n'@{pipeline().parameters.IsAdhoc}',\n'@{pipeline().RunId}', \n'@{pipeline().Pipeline}', \n@status,\n'@{pipeline().TriggerTime}', \n'@{utcnow()}',\nCASE WHEN @status != 'Succeeded'\nTHEN 'Please refer to pipeline run for error details.'\nEND \n);\n\nIF (@status != 'Succeeded')\nBEGIN\nRAISERROR('Error occurred during SS extraction.', 16, 1)\nEND\nELSE\nBEGIN\nSELECT 'AUDIT INSERTED'\nEND;",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "If Condition - Hash Validation Enabled",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Get source count",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@and(\nequals(activity('t_ctrl_ss_e_interface').output.firstRow.hash_val_enabled, 'Y'),\ncontains(activity('Get source count').output, 'firstRow')\n)",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "df_hashcode_validation",
+							"type": "ExecuteDataFlow",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"compute": {
+									"coreCount": 8,
+									"computeType": "General"
+								},
+								"traceLevel": "Fine"
+							}
+						},
+						{
+							"name": "Get hash validation count",
+							"type": "Lookup",
+							"dependsOn": [
+								{
+									"activity": "df_hashcode_validation",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "DelimitedTextSource",
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": true
+									},
+									"formatSettings": {
+										"type": "DelimitedTextReadSettings"
+									}
+								},
+								"firstRowOnly": true
+							}
+						},
+						{
+							"name": "Set variable - IsHashViolated",
+							"type": "SetVariable",
+							"dependsOn": [
+								{
+									"activity": "Get hash validation count",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "IsHashViolated",
+								"value": {
+									"value": "@contains(activity('Get hash validation count').output, 'firstRow')",
+									"type": "Expression"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Set Variable - Date Query",
+				"description": "",
+				"type": "SetVariable",
+				"dependsOn": [
+					{
+						"activity": "AKV - Get Secret Client",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "Query",
+					"value": {
+						"value": "@{replace(replace(activity('t_ctrl_ss_e_interface').output.firstRow.query,'{START_DT}',activity('t_ctrl_ss_e_data_watermark').output.firstRow.start_dt),'{END_DT}',activity('t_ctrl_ss_e_data_watermark').output.firstRow.end_dt)}",
+						"type": "Expression"
+					}
+				}
+			},
+			{
+				"name": "Move files to err",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "Update NEXT_BIZ_DT",
+						"dependencyConditions": [
+							"Skipped"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "BinarySource",
+						"storeSettings": {
+							"type": "AzureBlobFSReadSettings",
+							"recursive": false,
+							"wildcardFileName": {
+								"value": "*@{variables('Filename_DTTM')}*",
+								"type": "Expression"
+							},
+							"deleteFilesAfterCompletion": true
+						},
+						"formatSettings": {
+							"type": "BinaryReadSettings"
+						}
+					},
+					"sink": {
+						"type": "BinarySink",
+						"storeSettings": {
+							"type": "AzureBlobFSWriteSettings"
+						}
+					},
+					"enableStaging": false
+				}
+			},
+			{
+				"name": "pl_prd_running_pl_check",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_ss_e_data_watermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true,
+					"parameters": {
+						"PipelineName": {
+							"value": "@pipeline().Pipeline",
+							"type": "Expression"
+						},
+						"DataKey": {
+							"value": "@pipeline().parameters.DataKey",
+							"type": "Expression"
+						},
+						"SsKey": {
+							"value": "@pipeline().parameters.SsKey",
+							"type": "Expression"
+						},
+						"InterfaceKey": {
+							"value": "@pipeline().parameters.InterfaceKey",
+							"type": "Expression"
+						},
+						"PipelineRunId": {
+							"value": "@pipeline().RunId",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "Rerun Pipeline",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "Move files to err",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true,
+					"parameters": {
+						"DataKey": {
+							"value": "@pipeline().parameters.DataKey",
+							"type": "Expression"
+						},
+						"SsKey": {
+							"value": "@pipeline().parameters.SsKey",
+							"type": "Expression"
+						},
+						"InterfaceKey": {
+							"value": "@pipeline().parameters.InterfaceKey",
+							"type": "Expression"
+						},
+						"IsAdhoc": {
+							"value": "@pipeline().parameters.IsAdhoc",
+							"type": "Expression"
+						}
+					}
+				}
+			}
+		],
+		"concurrency": 10,
+		"parameters": {
+			"DataKey": {
+				"type": "string",
+				"defaultValue": "DR0003"
+			},
+			"SsKey": {
+				"type": "string",
+				"defaultValue": "SS001"
+			},
+			"InterfaceKey": {
+				"type": "string",
+				"defaultValue": "IF001"
+			},
+			"IsAdhoc": {
+				"type": "string",
+				"defaultValue": "Y"
+			}
+		},
+		"variables": {
+			"Query": {
+				"type": "String"
+			},
+			"Filename_DTTM": {
+				"type": "String"
+			},
+			"IsHashViolated": {
+				"type": "Boolean"
+			}
+		},
+		"folder": {
+			"name": "SS Extraction"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-05-23T06:40:29Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
