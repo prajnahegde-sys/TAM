@@ -62,6 +62,10 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
+								"pipeline": {
+									"referenceName": "pl_prd_ss_e_interface_master",
+									"type": "PipelineReference"
+								},
 								"waitOnCompletion": true
 							}
 						}
