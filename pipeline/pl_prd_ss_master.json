@@ -1,0 +1,572 @@
+{
+	"name": "pl_prd_ss_master",
+	"properties": {
+		"activities": [
+			{
+				"name": "t_ctrl_ss_master",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_asqlpool_scale - Scale Up",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT M.ss_key, M.ss_name, I.interface_key\nFROM db_meta.t_ctrl_ss_master M\nINNER JOIN db_meta.t_ctrl_ss_e_interface I ON M.ss_key = I.ss_key\nWHERE is_enabled = 'Y' \nORDER BY I.e_after_time ",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "ForEach1",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "Update Metadata in Control DB",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('t_ctrl_ss_master').output.value",
+						"type": "Expression"
+					},
+					"batchCount": 50,
+					"activities": [
+						{
+							"name": "pl_prd_ss_e_interface_master",
+							"type": "ExecutePipeline",
+							"dependsOn": [],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"waitOnCompletion": true,
+								"parameters": {
+									"SsKey": {
+										"value": "@item().ss_key",
+										"type": "Expression"
+									},
+									"IsAdhoc": {
+										"value": "@pipeline().parameters.IsAdhoc",
+										"type": "Expression"
+									},
+									"BizDate": {
+										"value": "@subtractFromTime(convertFromUtc(utcnow(),'Singapore Standard Time'),1,'Day','yyyy-MM-dd')",
+										"type": "Expression"
+									},
+									"InterfaceKey": {
+										"value": "@item().interface_key",
+										"type": "Expression"
+									}
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "pl_prd_ss_e_polling",
+				"type": "ExecutePipeline",
+				"dependsOn": [],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "t_ctrl_env_config",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_asqlpool_scale - Scale Up",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT * FROM db_meta.t_ctrl_env_config",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "If - Trigger Gatekeeper",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_env_config",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Update Metadata in Control DB",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@equals(pipeline().parameters.TriggerGatekeeper, 'Y')",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "Trigger Gatekeeper",
+							"description": "",
+							"type": "WebActivity",
+							"dependsOn": [
+								{
+									"activity": "Wait until TriggerGkAfterHour",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 5,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "POST",
+								"url": {
+									"value": "https://management.azure.com/subscriptions/@{activity('t_ctrl_env_config').output.firstRow.subscription_id}/resourceGroups/@{activity('t_ctrl_env_config').output.firstRow.resource_group_name}/providers/Microsoft.DataFactory/factories/@{activity('t_ctrl_env_config').output.firstRow.adf_002_name}/pipelines/pl_prd_poll_gatekeeper/createRun?api-version=2018-06-01\n\n",
+									"type": "Expression"
+								},
+								"body": {
+									"value": "@json(variables('GatekeeperParam'))",
+									"type": "Expression"
+								},
+								"authentication": {
+									"type": "MSI",
+									"resource": "https://management.azure.com/"
+								}
+							}
+						},
+						{
+							"name": "Wait until TriggerGkAfterHour",
+							"type": "Wait",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"waitTimeInSeconds": {
+									"value": "@max(\ncreateArray(div(sub(\nticks(convertToUtc(concat(formatDateTime(convertFromUtc(utcnow(), 'Singapore Standard Time'), 'MM-dd-yyyy'), ' ',string(pipeline().parameters.TriggerGkAfterHour),':00:00'), 'Singapore Standard Time')),\n\tticks(utcnow())),10000000),\n1\n))",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "Wait 5 mins",
+							"type": "Wait",
+							"dependsOn": [
+								{
+									"activity": "Trigger Gatekeeper",
+									"dependencyConditions": [
+										"Failed"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"waitTimeInSeconds": 300
+							}
+						},
+						{
+							"name": "Trigger Gatekeeper - Retry",
+							"description": "",
+							"type": "WebActivity",
+							"dependsOn": [
+								{
+									"activity": "Wait 5 mins",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 5,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "POST",
+								"url": {
+									"value": "https://management.azure.com/subscriptions/@{activity('t_ctrl_env_config').output.firstRow.subscription_id}/resourceGroups/@{activity('t_ctrl_env_config').output.firstRow.resource_group_name}/providers/Microsoft.DataFactory/factories/@{activity('t_ctrl_env_config').output.firstRow.adf_002_name}/pipelines/pl_prd_poll_gatekeeper_retry/createRun?api-version=2018-06-01\n\n",
+									"type": "Expression"
+								},
+								"body": {
+									"value": "@json(variables('GatekeeperParam'))",
+									"type": "Expression"
+								},
+								"authentication": {
+									"type": "MSI",
+									"resource": "https://management.azure.com/"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "pl_prd_asqlpool_scale - Scale Up",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_webhook_post",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true,
+					"parameters": {
+						"PricingTier": {
+							"value": "@pipeline().parameters.ScaleUpDbTier",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "Get Overall Failed Audit",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "ForEach1",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "DECLARE @current_dt date = (SELECT CONVERT(date, GETDATE() AT TIME ZONE 'UTC' AT TIME ZONE 'Singapore Standard Time'));\n\nWITH data_keys_enabled_cte\nAS\n(\n  SELECT W.*,\n    CONCAT(W.ss_key, ': ', W.ss_name) AS ss_key_name,\n    CONCAT(W.interface_key, ': ', W.integration_type) AS interface_key_type,\n    CONCAT(W.data_key, ': ', W.table_name) AS data_key_name\n  FROM db_meta.vw_ctrl_ss_e_data_watermark W\n  WHERE W.is_enabled = 'Y' AND W.ss_is_enabled = 'Y'\n), \n---------------- Get all data keys which were extracted today, or supposed to be extracted today -----------------\ndata_keys_ext\nAS\n(\n   SELECT * FROM data_keys_enabled_cte\n    WHERE data_key IN (\n      -- Get data keys with extraction today\n      SELECT data_key FROM db_meta.t_audit_ss_e \n      WHERE CONVERT(date, DATEADD(hour, 8, start_time_utc)) = @current_dt AND is_adhoc = 'N'\n      UNION\n      -- Get data keys which are supposed to extract today\n      SELECT data_key FROM data_keys_enabled_cte\n      WHERE e_delta_dt = DATEADD(day, -1, @current_dt)\n    ) AND data_key IN (\n      -- Check if data key have loading tables\n      SELECT DISTINCT a.data_key FROM db_meta.t_ctrl_t_dblnd2dbstruc a\n      JOIN db_meta.t_ctrl_t_dbstruc2dvrw b\n      ON a.data_key = b.data_key\n    )\n),\n-------------------------------------------------------------------------------------------------------------------\noverall\nAS\n(\n  SELECT DK.data_key, DK.table_name, DK.ss_key_name, DK.interface_key_type, SS_E.e_status, A1.status AS status1, A2.status AS status2, A3.dv_status AS status3,\n    SS_E.error_details AS e_error_details,\n    A1.error_details AS error_details1,\n    A2.error_details AS error_details2,\n    A3.dv_error_details AS error_details3,\n  ---------------- If Pending Run status exists and not failed------------------------\n    CASE WHEN (\n\t\t(\n\t\t\tCOALESCE(SS_E.e_status, 'Pending Run') = 'Pending Run' and \n\t\t\t(COALESCE(A1.status, 'Pending Run') = 'Succeeded' or COALESCE(A1.status, 'Pending Run') = 'Pending Run') and\n\t\t\t(COALESCE(A2.status, 'Pending Run') = 'Succeeded' or COALESCE(A2.status, 'Pending Run') = 'Pending Run') and\n\t\t\t(A3.status NOT LIKE '%' + 'Failed' + '%')\n\t\t)\n\t\tOR\n\t\t(\n\t\t\tCOALESCE(A1.status, 'Pending Run') = 'Pending Run' and \n\t\t\t(COALESCE(SS_E.e_status, 'Pending Run') = 'Succeeded' or COALESCE(SS_E.e_status, 'Pending Run') = 'Pending Run') and\n\t\t\t(COALESCE(A2.status, 'Pending Run') = 'Succeeded' or COALESCE(A2.status, 'Pending Run') = 'Pending Run') and\n\t\t\t(A3.status NOT LIKE '%' + 'Failed' + '%')\n\t\t)\n\t\tOR \n\t\t(\n\t\t\tCOALESCE(A2.status, 'Pending Run') = 'Pending Run' and \n\t\t\t(COALESCE(SS_E.e_status, 'Pending Run') = 'Succeeded' or COALESCE(SS_E.e_status, 'Pending Run') = 'Pending Run') and\n\t\t\t(COALESCE(A1.status, 'Pending Run') = 'Succeeded' or COALESCE(A1.status, 'Pending Run') = 'Pending Run') and\n\t\t\t(A3.status NOT LIKE '%' + 'Failed' + '%')\n\t\t)\n\t\tOR \n\t\t(\n\t\t\tA3.status LIKE '%' + 'Pending Run' + '%' and\n\t\t\t(COALESCE(SS_E.e_status, 'Pending Run') = 'Succeeded' or COALESCE(SS_E.e_status, 'Pending Run') = 'Pending Run') and\n\t\t\t(COALESCE(A1.status, 'Pending Run') = 'Succeeded' or COALESCE(A1.status, 'Pending Run') = 'Pending Run') and\n\t\t\t(COALESCE(A2.status, 'Pending Run') = 'Succeeded' or COALESCE(A1.status, 'Pending Run') = 'Pending Run') and \n\t\t\tA3.status NOT LIKE '%' + 'Failed' + '%'\n\t\t)\n\t) THEN 1 END AS is_pending_run, \n  ---------------- If any stage failed ------------------------\n    CASE WHEN (\n      (COALESCE(SS_E.e_status, 'Pending Run')  != 'Succeeded' and COALESCE(SS_E.e_status, 'Pending Run') != 'Pending Run')\n      OR\n      (COALESCE(A1.status, 'Pending Run')  != 'Succeeded' and COALESCE(A1.status, 'Pending Run') != 'Pending Run')\n      OR \n      (COALESCE(A2.status, 'Pending Run') != 'Succeeded' and COALESCE(A2.status, 'Pending Run') != 'Pending Run')\n      OR \n      (((SELECT STRING_AGG(TRIM(value), ',') FROM (SELECT distinct value FROM STRING_SPLIT(A3.status, ',')) TMP) != 'Succeeded' AND (SELECT STRING_AGG(TRIM(value), ',') FROM (SELECT distinct value FROM STRING_SPLIT(A3.status, ',')) TMP) LIKE '%' + 'Failed' + '%'))\n    ) THEN 1 END AS is_overall_failed\n\t\n    -----------------------------------------------------------\n  FROM data_keys_ext DK\n  ---------------- Get latest SS Extraction audit, for given data key -----------------\n  OUTER APPLY(\n      SELECT TOP 1 * FROM db_meta.t_audit_ss_e\n      WHERE CONVERT(date, DATEADD(hour, 8, start_time_utc)) = @current_dt\n      AND data_key = DK.data_key AND is_adhoc = 'N'\n      ORDER BY end_time_utc DESC\n  ) SS_E\n  -------------------------------------------------------------------------------------\n  ---------------- Get latest ADLS landing to DB landing audit, for given data key -----------------\n  OUTER APPLY(\n      SELECT TOP 1 * FROM db_meta.t_audit_t_lnd2dblnd\n      WHERE CONVERT(date, DATEADD(hour, 8, start_time_utc)) = @current_dt\n      AND data_key = DK.data_key AND is_adhoc = 'N'\n      ORDER BY end_time_utc DESC\n  ) A1\n  --------------------------------------------------------------------------------------------------\n  ---------------- Get latest DB landing to DB structured audit, for given data key -----------------\n  OUTER APPLY(\n      SELECT TOP 1 * FROM db_meta.t_audit_t_dblnd2dbstruc\n      WHERE CONVERT(date, DATEADD(hour, 8, start_time_utc)) = @current_dt\n      AND data_key = DK.data_key AND is_adhoc = 'N'\n      ORDER BY end_time_utc DESC\n  ) A2\n  ---------------------------------------------------------------------------------------------------\n  ---------------- Get latest DB structured to Data vault audit, for given data key -----------------\n  OUTER APPLY \n  (\n    SELECT STRING_AGG(CONCAT(dv_key_nm, ' - ', COALESCE(status, 'Pending Run')), CHAR(10)) WITHIN GROUP (ORDER BY dv_key_nm ASC) AS dv_status,\n      STRING_AGG(COALESCE(status, 'Pending Run'), ',') WITHIN GROUP (ORDER BY dv_key_nm ASC) AS status,\n      STRING_AGG(CASE WHEN NULLIF(DV.error_details, '') IS NOT NULL THEN CONCAT(dv_key_nm, ' - ',CHAR(10), error_details) END, CHAR(10)) WITHIN GROUP (ORDER BY dv_key_nm ASC) AS dv_error_details\n    FROM\n    (\n      SELECT CONCAT(DV.dv_key, ': ', DV.dv_nm) AS dv_key_nm, A.status, A.error_details, ROW_NUMBER() OVER(PARTITION BY DV.dv_key ORDER BY end_time_utc DESC) rn\n      FROM db_meta.t_ctrl_t_dbstruc2dvrw DV\n      LEFT JOIN db_meta.t_audit_t_dbstruc2dvrw A ON A.data_key = DV.data_key AND A.dv_key = DV.dv_key\n        AND CONVERT(date, DATEADD(hour, 8, A.start_time_utc)) = @current_dt AND A.is_adhoc = 'N'\n      WHERE DV.data_key = DK.data_key\n  ) DV\n  WHERE DV.rn = 1\n   ) A3\n  ---------------------------------------------------------------------------------------------------\n)\n---------------- Generate overall summary table (with vertical layout) ---------------------\nSELECT (\n    SELECT * FROM (\n        SELECT 'Header' AS [column], 'Overall Summary (by Source System)' AS [data]\n        UNION ALL\n        SELECT ss_key_name AS [column], CONCAT_WS(CHAR(10),\n          CASE WHEN tot_to_extract-tot_failed_overall-tot_pending_run > 0 THEN 'Successful - '+CONVERT(varchar, tot_to_extract-tot_failed_overall-tot_pending_run) END,\n          CASE WHEN tot_failed_overall > 0 THEN 'Failed - '+CONVERT(varchar, tot_failed_overall) END, \n\t\t  CASE WHEN tot_pending_run > 0 THEN 'Pending Run - '+CONVERT(varchar, tot_pending_run) END\n        ) AS [data]\n        FROM\n        (\n          SELECT ss_key_name, \n            COUNT(distinct data_key) AS tot_to_extract, \n            COUNT(distinct CASE WHEN is_overall_failed = 1 THEN data_key END) AS tot_failed_overall,\n\t\t\tCOUNT(distinct CASE WHEN is_pending_run = 1 THEN data_key END) AS tot_pending_run\n          FROM overall\n          GROUP BY ss_key_name\n        ) A\n    ) SUMMARY\n    FOR JSON PATH\n) summary_json, \n---------------------------------------------------------------------------------------------\n---------------- Generate detailed summary table (with horizontal layout) -------------------\n(\nSELECT\n'['+ CONCAT_WS(',',\n(SELECT 'Detailed Summary (by Data Key)' AS Header FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),\n(SELECT(\n    SELECT \n      data_key AS [Data Key],\n      table_name AS [Table Name],\n      ss_key_name AS [Source System],\n      interface_key_type AS [Interface Type],\n      CONVERT(varchar, @current_dt) AS [Pipeline Run Date],\n      COALESCE(e_status, 'Pending Run') AS [Stage 1 - Source System Extraction (Status)],\n      COALESCE(status1, 'Pending Run') AS [Stage 2 - ADLS Landing to DB Landing (Status)],\n      COALESCE(status2, 'Pending Run') AS [Stage 3 - DB Landing to DB Structured (Status)],\n      status3 as [Stage 4 - DB Structured to Data Vault (Status)]\n    FROM overall\n    WHERE is_overall_failed = 1 OR is_pending_run = 1\n    ORDER BY ss_key_name, data_key\n    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER\n    )\n)) + ']'\n) detailed_json,\n---------------------------------------------------------------------------------------------\n---------------- Get failure count -------------------\n(SELECT COUNT(distinct CASE WHEN is_overall_failed = 1 THEN data_key END) +  \nCOUNT(distinct CASE WHEN is_pending_run = 1 THEN data_key END)  AS tot_failed_overall FROM overall)\nAS tot_failed_count\n------------------------------------------------------\n",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "If Condition - Failed Email Notification",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Get Overall Failed Audit",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@greater(activity('Get Overall Failed Audit').output.firstRow.tot_failed_count, 0)",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "Send Failure Email",
+							"type": "ExecutePipeline",
+							"dependsOn": [],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"waitOnCompletion": true,
+								"parameters": {
+									"MailingListKey": "FAILURE_SUMMARY",
+									"Subject": "SS to DV Failed Pipeline Summary",
+									"PipelineName": {
+										"value": "@{pipeline().Pipeline}",
+										"type": "Expression"
+									},
+									"ErrorJsonArray": {
+										"value": "@activity('Get Overall Failed Audit').output.firstRow.detailed_json",
+										"type": "Expression"
+									},
+									"SummaryJsonArray": {
+										"value": "@activity('Get Overall Failed Audit').output.firstRow.summary_json",
+										"type": "Expression"
+									}
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "pl_prd_webhook_post",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_ss_e_polling",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true
+				}
+			},
+			{
+				"name": "Update Metadata in Control DB",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_ss_master",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 2,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[db_meta].[sp_schema_metadata]"
+				}
+			},
+			{
+				"name": "If - Trigger Gatekeeper_ai",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_env_config",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Update Metadata in Control DB",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@equals(pipeline().parameters.TriggerGatekeeper, 'Y')",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "Trigger Gatekeeper_copy1",
+							"description": "",
+							"type": "WebActivity",
+							"dependsOn": [
+								{
+									"activity": "Wait until TriggerGkAfterHour_copy1",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 5,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "POST",
+								"url": {
+									"value": "https://management.azure.com/subscriptions/@{activity('t_ctrl_env_config').output.firstRow.subscription_id}/resourceGroups/@{activity('t_ctrl_env_config').output.firstRow.resource_group_name}/providers/Microsoft.DataFactory/factories/@{activity('t_ctrl_env_config').output.firstRow.adf_002_name}/pipelines/pl_prd_poll_gatekeeper_ai/createRun?api-version=2018-06-01\n\n",
+									"type": "Expression"
+								},
+								"body": {
+									"value": "@json(variables('GatekeeperParam'))",
+									"type": "Expression"
+								},
+								"authentication": {
+									"type": "MSI",
+									"resource": "https://management.azure.com/"
+								}
+							}
+						},
+						{
+							"name": "Wait until TriggerGkAfterHour_copy1",
+							"type": "Wait",
+							"dependsOn": [],
+							"userProperties": [],
+							"typeProperties": {
+								"waitTimeInSeconds": {
+									"value": "@max(\ncreateArray(div(sub(\nticks(convertToUtc(concat(formatDateTime(convertFromUtc(utcnow(), 'Singapore Standard Time'), 'MM-dd-yyyy'), ' ',string(pipeline().parameters.TriggerGkAfterHour),':00:00'), 'Singapore Standard Time')),\n\tticks(utcnow())),10000000),\n1\n))",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "Wait 5 mins_copy1",
+							"type": "Wait",
+							"dependsOn": [
+								{
+									"activity": "Trigger Gatekeeper_copy1",
+									"dependencyConditions": [
+										"Failed"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"waitTimeInSeconds": 300
+							}
+						},
+						{
+							"name": "Trigger Gatekeeper - Retry_copy1",
+							"description": "",
+							"type": "WebActivity",
+							"dependsOn": [
+								{
+									"activity": "Wait 5 mins_copy1",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 5,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"method": "POST",
+								"url": {
+									"value": "https://management.azure.com/subscriptions/@{activity('t_ctrl_env_config').output.firstRow.subscription_id}/resourceGroups/@{activity('t_ctrl_env_config').output.firstRow.resource_group_name}/providers/Microsoft.DataFactory/factories/@{activity('t_ctrl_env_config').output.firstRow.adf_002_name}/pipelines/pl_prd_poll_gatekeeper_retry_ai/createRun?api-version=2018-06-01\n\n",
+									"type": "Expression"
+								},
+								"body": {
+									"value": "@json(variables('GatekeeperParam'))",
+									"type": "Expression"
+								},
+								"authentication": {
+									"type": "MSI",
+									"resource": "https://management.azure.com/"
+								}
+							}
+						}
+					]
+				}
+			}
+		],
+		"parameters": {
+			"IsAdhoc": {
+				"type": "string",
+				"defaultValue": "Y"
+			},
+			"TriggerGatekeeper": {
+				"type": "string",
+				"defaultValue": "Y"
+			},
+			"TriggerGkAfterHour": {
+				"type": "int",
+				"defaultValue": 3
+			},
+			"ScaleUpDbTier": {
+				"type": "string",
+				"defaultValue": "DW200c"
+			},
+			"ScaleDownDbTier": {
+				"type": "string",
+				"defaultValue": "DW100c"
+			}
+		},
+		"variables": {
+			"GatekeeperParam": {
+				"type": "String",
+				"defaultValue": "{ \"LoadInterval\":\"180\", \"IsAdHoc\":\"N\", \"RefreshAas\":\"Y\", \"ScaleDownDbTier\":\"@{pipeline().parameters.ScaleDownDbTier}\" }"
+			},
+			"poll_gatekeeper_name": {
+				"type": "String"
+			}
+		},
+		"folder": {
+			"name": "SS Extraction"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-05-23T06:41:39Z"
+	}
+}
