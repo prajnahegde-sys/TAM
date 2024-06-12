@@ -1,0 +1,538 @@
+{
+	"name": "pl_prd_adls2adls_sftp_IF",
+	"properties": {
+		"activities": [
+			{
+				"name": "t_ctrl_ss_e_interface",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT data_key, I.ss_key, I.interface_key, adls_ss_dir, rdb.table_name,\nraw_data_format\nFROM db_meta.t_ctrl_ss_e_interface I\nINNER JOIN db_meta.t_ctrl_ss_e_data_rdb rdb\nON I.ss_key = rdb.ss_key\nAND I.interface_key = rdb.interface_key\nAND rdb.data_key = '@{pipeline().parameters.DataKey}'\nWHERE I.ss_key = '@{pipeline().parameters.SsKey}' AND I.interface_key = '@{pipeline().parameters.InterfaceKey}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"firstRowOnly": true
+				}
+			},
+			{
+				"name": "t_ctrl_ss_e_data_watermark",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_ss_e_interface",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT data_key, start_dt, end_dt, current_dt, new_biz_dt\nFROM db_meta.vw_ctrl_ss_e_data_watermark\nWHERE data_key = '@{pipeline().parameters.DataKey}';",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "Update NEXT_BIZ_DT",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Update SS Extraction Audit",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "12:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "IF ( '@{pipeline().parameters.IsAdhoc}' = 'N')\nBEGIN\nUPDATE db_meta.t_ctrl_ss_e_data_watermark \nSET \n\tnext_biz_dt = '@{activity('t_ctrl_ss_e_data_watermark').output.firstRow.new_biz_dt}',\n\tbiz_dt = '@{activity('t_ctrl_ss_e_data_watermark').output.firstRow.current_dt}',\n\textract_dttm = '@{convertFromUtc(utcnow(), 'Singapore Standard Time')}'\nWHERE data_key = '@{pipeline().parameters.DataKey}'\nEND\n\nSELECT next_biz_dt FROM db_meta.t_ctrl_ss_e_data_watermark WHERE data_key = '@{pipeline().parameters.DataKey}';",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "pl_prd_data2arch_adls",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_running_pl_check",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true,
+					"parameters": {
+						"SsDirectoryName": {
+							"value": "@activity('t_ctrl_ss_e_interface').output.firstRow.adls_ss_dir",
+							"type": "Expression"
+						},
+						"TableName": {
+							"value": "@activity('t_ctrl_ss_e_interface').output.firstRow.table_name",
+							"type": "Expression"
+						},
+						"AdlsDirectoryName": {
+							"value": "lnd",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "Update SS Extraction Audit",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "Insert SS Extraction Audit",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "DECLARE @status varchar(100) = '@{coalesce(activity('SS to ADLS')?.Status, 'Failed')}';\nDECLARE @csv_poll_status varchar(100) = '@{coalesce(activity('Until CSV file exist')?.Status, 'Failed')}';\nDECLARE @e_file_size_bytes bigint = @{coalesce(activity('SS to ADLS')?.output?.dataWritten, 'NULL')};\nDECLARE @e_row_count bigint = @{coalesce(activity('SS to ADLS')?.output?.rowsCopied, 'NULL')};\n\n-- Update audit with extraction information\nUPDATE db_meta.t_audit_ss_e\nSET\n      adls_filename = '@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.adls_path}/@{toLower(string(activity('Get max datetime filename')?.output?.firstRow?.filename))}', \n      parameters = \n'{\n    \"sftp_host\": \"@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.rdb_server_host}\",\n    \"sftp_port\": \"@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.rdb_server_port}\",\n    \"sftp_dir\": \"@{activity('t_ctrl_ss_e_interface')?.output?.firstRow?.sftp_dir}\"\n}', \n      e_file_size_bytes = @e_file_size_bytes,\n      e_no_rows = @e_row_count,\n      biz_dt = '@{activity('t_ctrl_ss_e_data_watermark')?.output?.firstRow?.current_dt}'\nWHERE run_id = '@{pipeline().RunId}';\n\nIF (@status != 'Succeeded' )\nBEGIN\n\nUPDATE db_meta.t_audit_ss_e\nSET e_status = 'Failed',\n      error_details = COALESCE(\n      \t\t@{if(empty(activity('pl_prd_running_pl_check')?.Error), 'NULL', concat('''', replace(string(activity('pl_prd_running_pl_check')?.Error), '''', ''''''), ''''))},\n      \t\t@{if(empty(activity('pl_prd_data2arch_adls')?.Error), 'NULL', concat('''', replace(string(activity('pl_prd_data2arch_adls')?.Error), '''', ''''''), ''''))},\n      \t\t@{if(empty(activity('Get Metadata')?.Error), 'NULL', concat('''', replace(string(activity('Get Metadata')?.Error), '''', ''''''), ''''))},\n      \t\t@{if(empty(activity('Get max datetime filename')?.Error), 'NULL', concat('''', replace(string(activity('Get max datetime filename')?.Error), '''', ''''''), ''''))},\n      \t\t@{if(empty(activity('SS to ADLS')?.Error), 'NULL', concat('''', replace(string(activity('SS to ADLS')?.Error), '''', ''''''), ''''))},\n      \t\t@{if(empty(activity('Until CSV file exist')?.Error), 'NULL', concat('''', replace(string(activity('Until CSV file exist')?.Error), '''', ''''''), ''''))},\n            'Please refer to pipeline run for error details.'\n            )\nWHERE run_id = '@{pipeline().RunId}';\n\nRAISERROR('Error occurred during SS extraction.', 16, 1)\nEND\nELSE\nBEGIN\nSELECT 'SUCCEEDED'\nEND;",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "Insert SS Extraction Audit",
+				"type": "Lookup",
+				"dependsOn": [
+					{
+						"activity": "If Condition - CSV file exist",
+						"dependencyConditions": [
+							"Completed",
+							"Skipped"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "DECLARE @status varchar(100) = '@{coalesce(activity('SS to ADLS')?.Status, 'Failed')}';\n\n-- Insert audit with information which are independent of any activity run in pipeline and status\nINSERT INTO db_meta.t_audit_ss_e (data_key, ss_key, interface_key, is_adhoc, run_id, pipeline_name, e_status, start_time_utc, end_time_utc, error_details)\nVALUES('@{pipeline().parameters.DataKey}', \n'@{pipeline().parameters.SsKey}', \n'@{pipeline().parameters.InterfaceKey}', \n'@{pipeline().parameters.IsAdhoc}',\n'@{pipeline().RunId}', \n'@{pipeline().Pipeline}', \n@status,\n'@{pipeline().TriggerTime}', \n'@{utcnow()}',\nCASE WHEN @status != 'Succeeded'\nTHEN 'Please refer to pipeline run for error details.'\nEND \n);\n\nIF (@status != 'Succeeded')\nBEGIN\nRAISERROR('Error occurred during SS extraction.', 16, 1)\nEND\nELSE\nBEGIN\nSELECT 'AUDIT INSERTED'\nEND;",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "SS to Archive SS",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "Update NEXT_BIZ_DT",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "12:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": true
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "DelimitedTextSource",
+						"storeSettings": {
+							"type": "AzureBlobFSReadSettings",
+							"recursive": true,
+							"enablePartitionDiscovery": false
+						},
+						"formatSettings": {
+							"type": "DelimitedTextReadSettings"
+						}
+					},
+					"sink": {
+						"type": "DelimitedTextSink",
+						"storeSettings": {
+							"type": "AzureBlobFSWriteSettings"
+						},
+						"formatSettings": {
+							"type": "DelimitedTextWriteSettings",
+							"quoteAllText": true,
+							"fileExtension": ".txt"
+						}
+					},
+					"enableStaging": false
+				}
+			},
+			{
+				"name": "pl_prd_running_pl_check",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_ss_e_data_watermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true,
+					"parameters": {
+						"PipelineName": {
+							"value": "@pipeline().Pipeline",
+							"type": "Expression"
+						},
+						"DataKey": {
+							"value": "@pipeline().parameters.DataKey",
+							"type": "Expression"
+						},
+						"SsKey": {
+							"value": "@pipeline().parameters.SsKey",
+							"type": "Expression"
+						},
+						"InterfaceKey": {
+							"value": "@pipeline().parameters.InterfaceKey",
+							"type": "Expression"
+						},
+						"PipelineRunId": {
+							"value": "@pipeline().RunId",
+							"type": "Expression"
+						}
+					}
+				}
+			},
+			{
+				"name": "Until CSV file exist",
+				"type": "Until",
+				"dependsOn": [
+					{
+						"activity": "pl_prd_data2arch_adls",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@and(\nnot(empty(activity('Filter CSV')?.output?.Value)),\ngreater(activity('Filter CSV').output.FilteredItemsCount, 0)\n)",
+						"type": "Expression"
+					},
+					"activities": [
+						{
+							"name": "Get Metadata",
+							"type": "GetMetadata",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"fieldList": [
+									"childItems",
+									"lastModified"
+								],
+								"storeSettings": {
+									"type": "AzureBlobFSReadSettings",
+									"recursive": true
+								},
+								"formatSettings": {
+									"type": "DelimitedTextReadSettings"
+								}
+							}
+						},
+						{
+							"name": "Filter CSV",
+							"type": "Filter",
+							"dependsOn": [
+								{
+									"activity": "Get Metadata",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"items": {
+									"value": "@activity('Get Metadata').output.childItems",
+									"type": "Expression"
+								},
+								"condition": {
+									"value": "@and(and(endswith(item().name,'.csv'),\nequals(item().type, 'File')),\ncontains(toLower(item().name), toLower(activity('t_ctrl_ss_e_interface').output.firstRow.table_name)\n))",
+									"type": "Expression"
+								}
+							}
+						},
+						{
+							"name": "If Condition - CSV exists",
+							"type": "IfCondition",
+							"dependsOn": [
+								{
+									"activity": "Filter CSV",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"userProperties": [],
+							"typeProperties": {
+								"expression": {
+									"value": "@greater(activity('Filter CSV').output.FilteredItemsCount, 0)",
+									"type": "Expression"
+								},
+								"ifFalseActivities": [
+									{
+										"name": "Wait 10 minutes",
+										"type": "Wait",
+										"dependsOn": [],
+										"userProperties": [],
+										"typeProperties": {
+											"waitTimeInSeconds": 600
+										}
+									}
+								]
+							}
+						}
+					],
+					"timeout": "0.01:00:00"
+				}
+			},
+			{
+				"name": "If Condition - CSV file exist",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Until CSV file exist",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@and(\nnot(empty(activity('Filter CSV')?.output?.Value)),\ngreater(activity('Filter CSV').output.FilteredItemsCount, 0)\n)",
+						"type": "Expression"
+					},
+					"ifTrueActivities": [
+						{
+							"name": "SS to ADLS",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "Get max datetime filename",
+									"dependencyConditions": [
+										"Succeeded"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": true
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "DelimitedTextSource",
+									"additionalColumns": [
+										{
+											"name": "EXTRACT_DATE",
+											"value": {
+												"value": "@formatDateTime(convertFromUtc(utcNow(), 'Singapore Standard Time'),'yyyy-MM-dd HH:mm:ss')",
+												"type": "Expression"
+											}
+										}
+									],
+									"storeSettings": {
+										"type": "AzureBlobFSReadSettings",
+										"recursive": false
+									},
+									"formatSettings": {
+										"type": "DelimitedTextReadSettings"
+									}
+								},
+								"sink": {
+									"type": "DelimitedTextSink",
+									"storeSettings": {
+										"type": "AzureBlobFSWriteSettings"
+									},
+									"formatSettings": {
+										"type": "DelimitedTextWriteSettings",
+										"quoteAllText": true,
+										"fileExtension": ".txt"
+									}
+								},
+								"enableStaging": false
+							}
+						},
+						{
+							"name": "Get max datetime filename",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "7.00:00:00",
+								"retry": 3,
+								"retryIntervalInSeconds": 300,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureSqlSource",
+									"sqlReaderQuery": {
+										"value": "SELECT\n\tTOP 1\n\t-- Format date from (yyyyMMddhhmmss) to (yyyyMMdd hh:mm:ss)\n\tCONVERT(datetime,\n\t\tSTUFF(STUFF(STUFF(str_dt, 9, 0, ' '), 12, 0, ':'),\n\t        15, 0, ':')) AS file_dt,\n\tname AS filename\nFROM\n(\n\tSELECT \n\tREPLACE(RIGHT(name,CHARINDEX('_',REVERSE(name))-1), '.csv', '') AS str_dt,\n\tname\n\tFROM OPENJSON('@{replace(string(activity('Filter CSV').output.Value), '''', '''''')}') \n\tWITH (\n\t\tname nvarchar(max) '$.name'\n\t) f\n) dt\nORDER BY file_dt DESC",
+										"type": "Expression"
+									},
+									"queryTimeout": "02:00:00",
+									"partitionOption": "None"
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Rerun Pipeline",
+				"type": "ExecutePipeline",
+				"dependsOn": [
+					{
+						"activity": "SS to Archive SS",
+						"dependencyConditions": [
+							"Skipped"
+						]
+					}
+				],
+				"policy": {
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"waitOnCompletion": true,
+					"parameters": {
+						"DataKey": {
+							"value": "@pipeline().parameters.DataKey",
+							"type": "Expression"
+						},
+						"SsKey": {
+							"value": "@pipeline().parameters.SsKey",
+							"type": "Expression"
+						},
+						"InterfaceKey": {
+							"value": "@pipeline().parameters.InterfaceKey",
+							"type": "Expression"
+						},
+						"IsAdhoc": {
+							"value": "@pipeline().parameters.IsAdhoc",
+							"type": "Expression"
+						}
+					}
+				}
+			}
+		],
+		"concurrency": 2,
+		"parameters": {
+			"DataKey": {
+				"type": "string",
+				"defaultValue": "DR0330"
+			},
+			"SsKey": {
+				"type": "string",
+				"defaultValue": "SS048"
+			},
+			"InterfaceKey": {
+				"type": "string",
+				"defaultValue": "IF001"
+			},
+			"IsAdhoc": {
+				"type": "string",
+				"defaultValue": "Y"
+			}
+		},
+		"folder": {
+			"name": "SS Extraction"
+		},
+		"annotations": [],
+		"lastPublishTime": "2024-05-23T06:39:19Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}
