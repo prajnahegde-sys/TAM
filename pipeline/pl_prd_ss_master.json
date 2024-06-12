@@ -62,25 +62,7 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
-								"waitOnCompletion": true,
-								"parameters": {
-									"SsKey": {
-										"value": "@item().ss_key",
-										"type": "Expression"
-									},
-									"IsAdhoc": {
-										"value": "@pipeline().parameters.IsAdhoc",
-										"type": "Expression"
-									},
-									"BizDate": {
-										"value": "@subtractFromTime(convertFromUtc(utcnow(),'Singapore Standard Time'),1,'Day','yyyy-MM-dd')",
-										"type": "Expression"
-									},
-									"InterfaceKey": {
-										"value": "@item().interface_key",
-										"type": "Expression"
-									}
-								}
+								"waitOnCompletion": true
 							}
 						}
 					]
@@ -95,6 +77,10 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
+					"pipeline": {
+						"referenceName": "pl_prd_polling_sftp_auto2000_IF",
+						"type": "PipelineReference"
+					},
 					"waitOnCompletion": true
 				}
 			},
