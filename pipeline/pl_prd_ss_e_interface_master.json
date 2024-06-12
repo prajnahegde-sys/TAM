@@ -23,7 +23,7 @@
 					"batchCount": 30,
 					"activities": [
 						{
-							"name": "Execute SS to DV Pipeline",
+							"name": "Execute SS to CN Pipeline",
 							"type": "ExecutePipeline",
 							"dependsOn": [
 								{
@@ -38,29 +38,7 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
-								"waitOnCompletion": true,
-								"parameters": {
-									"DataKey": {
-										"value": "@item().data_key",
-										"type": "Expression"
-									},
-									"SsKey": {
-										"value": "@item().ss_key",
-										"type": "Expression"
-									},
-									"InterfaceKey": {
-										"value": "@item().interface_key",
-										"type": "Expression"
-									},
-									"IsAdhoc": {
-										"value": "@pipeline().parameters.IsAdhoc",
-										"type": "Expression"
-									},
-									"TriggerDvLoad": {
-										"value": "@pipeline().parameters.TriggerDvLoad",
-										"type": "Expression"
-									}
-								}
+								"waitOnCompletion": true
 							}
 						},
 						{
@@ -181,21 +159,7 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
-								"waitOnCompletion": true,
-								"parameters": {
-									"SsKey": {
-										"value": "@pipeline().parameters.SsKey",
-										"type": "Expression"
-									},
-									"InterfaceKey": {
-										"value": "@pipeline().parameters.InterfaceKey",
-										"type": "Expression"
-									},
-									"IsAdhoc": {
-										"value": "@pipeline().parameters.IsAdhoc",
-										"type": "Expression"
-									}
-								}
+								"waitOnCompletion": true
 							}
 						}
 					]
