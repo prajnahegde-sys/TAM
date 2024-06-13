@@ -267,7 +267,7 @@
 							}
 						},
 						{
-							"name": "Filter CSV",
+							"name": "Filter file",
 							"type": "Filter",
 							"dependsOn": [
 								{
@@ -290,11 +290,11 @@
 							}
 						},
 						{
-							"name": "If Condition - CSV exists",
+							"name": "If Condition - file exists",
 							"type": "IfCondition",
 							"dependsOn": [
 								{
-									"activity": "Filter CSV",
+									"activity": "Filter file",
 									"dependencyConditions": [
 										"Succeeded"
 									]
