@@ -145,7 +145,7 @@
 				"type": "Lookup",
 				"dependsOn": [
 					{
-						"activity": "If Condition - CSV file exist",
+						"activity": "If Condition - file exist",
 						"dependencyConditions": [
 							"Completed",
 							"Skipped"
@@ -226,7 +226,7 @@
 				}
 			},
 			{
-				"name": "Until CSV file exist",
+				"name": "Until file exist",
 				"type": "Until",
 				"dependsOn": [
 					{
@@ -324,11 +324,11 @@
 				}
 			},
 			{
-				"name": "If Condition - CSV file exist",
+				"name": "If Condition - file exist",
 				"type": "IfCondition",
 				"dependsOn": [
 					{
-						"activity": "Until CSV file exist",
+						"activity": "Until file exist",
 						"dependencyConditions": [
 							"Completed"
 						]
