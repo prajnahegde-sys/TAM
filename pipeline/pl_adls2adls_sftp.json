@@ -3,7 +3,7 @@
 	"properties": {
 		"activities": [
 			{
-				"name": "t_ctrl_ss_e_interface",
+				"name": "t_ctrl_e_interface",
 				"type": "Lookup",
 				"dependsOn": [],
 				"policy": {
@@ -28,11 +28,11 @@
 				}
 			},
 			{
-				"name": "t_ctrl_ss_e_data_watermark",
+				"name": "t_ctrl_e_data_watermark",
 				"type": "Lookup",
 				"dependsOn": [
 					{
-						"activity": "t_ctrl_ss_e_interface",
+						"activity": "t_ctrl_e_interface",
 						"dependencyConditions": [
 							"Succeeded"
 						]
@@ -63,7 +63,7 @@
 				"type": "Lookup",
 				"dependsOn": [
 					{
-						"activity": "Update SS Extraction Audit",
+						"activity": "Update Extraction Audit",
 						"dependencyConditions": [
 							"Succeeded"
 						]
@@ -91,11 +91,11 @@
 				}
 			},
 			{
-				"name": "pl_prd_data2arch_adls",
+				"name": "pl_data2arch_adls",
 				"type": "ExecutePipeline",
 				"dependsOn": [
 					{
-						"activity": "pl_prd_running_pl_check",
+						"activity": "pl_running_pl_check",
 						"dependencyConditions": [
 							"Succeeded"
 						]
@@ -106,29 +106,15 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
-					"waitOnCompletion": true,
-					"parameters": {
-						"SsDirectoryName": {
-							"value": "@activity('t_ctrl_ss_e_interface').output.firstRow.adls_ss_dir",
-							"type": "Expression"
-						},
-						"TableName": {
-							"value": "@activity('t_ctrl_ss_e_interface').output.firstRow.table_name",
-							"type": "Expression"
-						},
-						"AdlsDirectoryName": {
-							"value": "lnd",
-							"type": "Expression"
-						}
-					}
+					"waitOnCompletion": true
 				}
 			},
 			{
-				"name": "Update SS Extraction Audit",
+				"name": "Update Extraction Audit",
 				"type": "Lookup",
 				"dependsOn": [
 					{
-						"activity": "Insert SS Extraction Audit",
+						"activity": "Insert Extraction Audit",
 						"dependencyConditions": [
 							"Completed"
 						]
@@ -155,7 +141,7 @@
 				}
 			},
 			{
-				"name": "Insert SS Extraction Audit",
+				"name": "Insert Extraction Audit",
 				"type": "Lookup",
 				"dependsOn": [
 					{
@@ -217,26 +203,15 @@
 							"type": "DelimitedTextReadSettings"
 						}
 					},
-					"sink": {
-						"type": "DelimitedTextSink",
-						"storeSettings": {
-							"type": "AzureBlobFSWriteSettings"
-						},
-						"formatSettings": {
-							"type": "DelimitedTextWriteSettings",
-							"quoteAllText": true,
-							"fileExtension": ".txt"
-						}
-					},
 					"enableStaging": false
 				}
 			},
 			{
-				"name": "pl_prd_running_pl_check",
+				"name": "pl_running_pl_check",
 				"type": "ExecutePipeline",
 				"dependsOn": [
 					{
-						"activity": "t_ctrl_ss_e_data_watermark",
+						"activity": "t_ctrl_e_data_watermark",
 						"dependencyConditions": [
 							"Succeeded"
 						]
@@ -247,29 +222,7 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
-					"waitOnCompletion": true,
-					"parameters": {
-						"PipelineName": {
-							"value": "@pipeline().Pipeline",
-							"type": "Expression"
-						},
-						"DataKey": {
-							"value": "@pipeline().parameters.DataKey",
-							"type": "Expression"
-						},
-						"SsKey": {
-							"value": "@pipeline().parameters.SsKey",
-							"type": "Expression"
-						},
-						"InterfaceKey": {
-							"value": "@pipeline().parameters.InterfaceKey",
-							"type": "Expression"
-						},
-						"PipelineRunId": {
-							"value": "@pipeline().RunId",
-							"type": "Expression"
-						}
-					}
+					"waitOnCompletion": true
 				}
 			},
 			{
@@ -277,7 +230,7 @@
 				"type": "Until",
 				"dependsOn": [
 					{
-						"activity": "pl_prd_data2arch_adls",
+						"activity": "pl_data2arch_adls",
 						"dependencyConditions": [
 							"Succeeded"
 						]
@@ -473,25 +426,7 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
-					"waitOnCompletion": true,
-					"parameters": {
-						"DataKey": {
-							"value": "@pipeline().parameters.DataKey",
-							"type": "Expression"
-						},
-						"SsKey": {
-							"value": "@pipeline().parameters.SsKey",
-							"type": "Expression"
-						},
-						"InterfaceKey": {
-							"value": "@pipeline().parameters.InterfaceKey",
-							"type": "Expression"
-						},
-						"IsAdhoc": {
-							"value": "@pipeline().parameters.IsAdhoc",
-							"type": "Expression"
-						}
-					}
+					"waitOnCompletion": true
 				}
 			}
 		],
