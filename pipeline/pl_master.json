@@ -82,7 +82,7 @@
 				"userProperties": [],
 				"typeProperties": {
 					"pipeline": {
-						"referenceName": "pl_polling_sftp_auto2000",
+						"referenceName": "pl_e_polling",
 						"type": "PipelineReference"
 					},
 					"waitOnCompletion": true
