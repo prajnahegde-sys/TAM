@@ -73,7 +73,7 @@
 				}
 			},
 			{
-				"name": "pl_prd_ss_e_polling",
+				"name": "pl_e_polling",
 				"type": "ExecutePipeline",
 				"dependsOn": [],
 				"policy": {
@@ -93,7 +93,7 @@
 				"type": "ExecutePipeline",
 				"dependsOn": [
 					{
-						"activity": "pl_prd_ss_e_polling",
+						"activity": "pl_e_polling",
 						"dependencyConditions": [
 							"Succeeded"
 						]
