@@ -23,7 +23,7 @@
 					"batchCount": 30,
 					"activities": [
 						{
-							"name": "Execute SS to CN Pipeline",
+							"name": "Execute SS to Raw Pipeline",
 							"type": "ExecutePipeline",
 							"dependsOn": [
 								{
@@ -38,6 +38,10 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
+								"pipeline": {
+									"referenceName": "pl_adls2adls_sftp",
+									"type": "PipelineReference"
+								},
 								"waitOnCompletion": true
 							}
 						},
