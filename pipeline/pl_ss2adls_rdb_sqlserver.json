@@ -1,5 +1,5 @@
 {
-	"name": "pl_prd_ss2adls_rdb_sqlserver_IF",
+	"name": "pl_ss2adls_rdb_sqlserver",
 	"properties": {
 		"activities": [
 			{

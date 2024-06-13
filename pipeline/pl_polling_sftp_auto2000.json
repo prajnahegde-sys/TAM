@@ -1,5 +1,5 @@
 {
-	"name": "pl_prd_polling_sftp_auto2000_IF",
+	"name": "pl_polling_sftp_auto2000",
 	"properties": {
 		"activities": [
 			{
@@ -22,10 +22,7 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
-					"fieldList": [
-						"childItems",
-						"lastModified"
-					],
+					"fieldList": [],
 					"storeSettings": {
 						"type": "SftpReadSettings",
 						"recursive": true

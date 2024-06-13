@@ -1,5 +1,5 @@
 {
-	"name": "pl_prd_adls2adls_sftp_IF",
+	"name": "pl_adls2adls_sftp",
 	"properties": {
 		"activities": [
 			{
@@ -303,10 +303,7 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
-								"fieldList": [
-									"childItems",
-									"lastModified"
-								],
+								"fieldList": [],
 								"storeSettings": {
 									"type": "AzureBlobFSReadSettings",
 									"recursive": true
@@ -428,17 +425,6 @@
 									},
 									"formatSettings": {
 										"type": "DelimitedTextReadSettings"
-									}
-								},
-								"sink": {
-									"type": "DelimitedTextSink",
-									"storeSettings": {
-										"type": "AzureBlobFSWriteSettings"
-									},
-									"formatSettings": {
-										"type": "DelimitedTextWriteSettings",
-										"quoteAllText": true,
-										"fileExtension": ".txt"
 									}
 								},
 								"enableStaging": false

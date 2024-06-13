@@ -1,5 +1,5 @@
 {
-	"name": "pl_prd_ss_e_interface_master",
+	"name": "pl_e_interface_master",
 	"properties": {
 		"description": "Trigger all \"enabled\" DATA_KEYs for a given SS_KEY, using the interface configurations stated in db_meta.t_ctrl_ss_e_interface",
 		"activities": [

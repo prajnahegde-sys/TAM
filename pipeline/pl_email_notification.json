@@ -1,5 +1,5 @@
 {
-	"name": "pl_prd_email_notification",
+	"name": "pl_email_notification",
 	"properties": {
 		"activities": [
 			{

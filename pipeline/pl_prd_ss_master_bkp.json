@@ -273,7 +273,7 @@
 				"userProperties": [],
 				"typeProperties": {
 					"pipeline": {
-						"referenceName": "pl_prd_asqlpool_scale",
+						"referenceName": "pl_asqlpool_scale",
 						"type": "PipelineReference"
 					},
 					"waitOnCompletion": true

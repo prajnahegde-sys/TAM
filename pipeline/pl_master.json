@@ -1,5 +1,5 @@
 {
-	"name": "pl_prd_ss_master",
+	"name": "pl_master",
 	"properties": {
 		"activities": [
 			{
@@ -63,7 +63,7 @@
 							"userProperties": [],
 							"typeProperties": {
 								"pipeline": {
-									"referenceName": "pl_prd_ss_e_interface_master",
+									"referenceName": "pl_e_interface_master",
 									"type": "PipelineReference"
 								},
 								"waitOnCompletion": true
@@ -82,7 +82,7 @@
 				"userProperties": [],
 				"typeProperties": {
 					"pipeline": {
-						"referenceName": "pl_prd_polling_sftp_auto2000_IF",
+						"referenceName": "pl_polling_sftp_auto2000",
 						"type": "PipelineReference"
 					},
 					"waitOnCompletion": true
@@ -105,7 +105,7 @@
 				"userProperties": [],
 				"typeProperties": {
 					"pipeline": {
-						"referenceName": "pl_prd_asqlpool_scale",
+						"referenceName": "pl_asqlpool_scale",
 						"type": "PipelineReference"
 					},
 					"waitOnCompletion": true
@@ -171,7 +171,7 @@
 							"userProperties": [],
 							"typeProperties": {
 								"pipeline": {
-									"referenceName": "pl_prd_email_notification",
+									"referenceName": "pl_email_notification",
 									"type": "PipelineReference"
 								},
 								"waitOnCompletion": true

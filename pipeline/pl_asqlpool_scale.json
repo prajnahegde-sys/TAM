@@ -1,5 +1,5 @@
 {
-	"name": "pl_prd_asqlpool_scale",
+	"name": "pl_asqlpool_scale",
 	"properties": {
 		"activities": [
 			{
