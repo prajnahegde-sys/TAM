@@ -1,0 +1,68 @@
+{
+	"name": "pl_polling_e",
+	"properties": {
+		"activities": [
+			{
+				"name": "t_ctrl_ss_e_interface",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "7.00:00:00",
+					"retry": 3,
+					"retryIntervalInSeconds": 300,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT JSON_VALUE(add_params, '$.sftp_dir') AS sftp_dir\nFROM db_meta.t_ctrl_ss_e_interface\nWHERE ss_key = '@{pipeline().parameters.SsKey}'\nAND interface_key = '@{pipeline().parameters.InterfaceKey}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "If Condition1",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "t_ctrl_ss_e_interface",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"ifTrueActivities": [
+						{
+							"name": "pl_polling_sftp_auto2000",
+							"type": "ExecutePipeline",
+							"dependsOn": [],
+							"policy": {
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"pipeline": {
+									"referenceName": "pl_polling_sftp_auto2000",
+									"type": "PipelineReference"
+								},
+								"waitOnCompletion": true
+							}
+						}
+					]
+				}
+			}
+		],
+		"folder": {
+			"name": "Polling"
+		},
+		"annotations": []
+	}
+}
