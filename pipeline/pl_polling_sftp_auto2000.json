@@ -22,14 +22,11 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
-					"fieldList": [],
-					"storeSettings": {
-						"type": "SftpReadSettings",
-						"recursive": true
+					"dataset": {
+						"referenceName": "AzureSqlTable1",
+						"type": "DatasetReference"
 					},
-					"formatSettings": {
-						"type": "DelimitedTextReadSettings"
-					}
+					"fieldList": []
 				}
 			},
 			{
@@ -60,6 +57,10 @@
 						},
 						"queryTimeout": "02:00:00",
 						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "AzureSqlTable1",
+						"type": "DatasetReference"
 					}
 				}
 			},
