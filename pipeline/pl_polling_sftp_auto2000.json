@@ -23,7 +23,7 @@
 				"userProperties": [],
 				"typeProperties": {
 					"dataset": {
-						"referenceName": "AzureSqlTable1",
+						"referenceName": "ds_sql_dxdb",
 						"type": "DatasetReference"
 					},
 					"fieldList": []
@@ -59,7 +59,7 @@
 						"partitionOption": "None"
 					},
 					"dataset": {
-						"referenceName": "AzureSqlTable1",
+						"referenceName": "ds_sql_dxdb",
 						"type": "DatasetReference"
 					}
 				}
@@ -94,7 +94,7 @@
 						"partitionOption": "None"
 					},
 					"dataset": {
-						"referenceName": "AzureSqlTable1",
+						"referenceName": "ds_sql_dxdb",
 						"type": "DatasetReference"
 					}
 				}
@@ -122,7 +122,7 @@
 						"partitionOption": "None"
 					},
 					"dataset": {
-						"referenceName": "AzureSqlTable1",
+						"referenceName": "ds_sql_dxdb",
 						"type": "DatasetReference"
 					}
 				}

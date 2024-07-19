@@ -1,5 +1,5 @@
 {
-	"name": "pl_ss2adls_rdb_sqlserver",
+	"name": "pl_ss2adls_dxdb",
 	"properties": {
 		"activities": [
 			{
@@ -115,7 +115,7 @@
 						"partitionOption": "None"
 					},
 					"dataset": {
-						"referenceName": "AzureSqlTable1",
+						"referenceName": "ds_sql_dxdb",
 						"type": "DatasetReference"
 					},
 					"firstRowOnly": true

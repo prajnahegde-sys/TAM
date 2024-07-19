@@ -48,7 +48,7 @@
 				],
 				"outputs": [
 					{
-						"referenceName": "AzureSqlTable1",
+						"referenceName": "ds_sql_dxdb",
 						"type": "DatasetReference"
 					}
 				]
